@@ -188,15 +188,15 @@ make clean
 
 ## 3. Demo with Screenshots
 
-1. Multi-container supervision  
-Show two or more containers running under one supervisor process.  
+1. Multi-container supervision   
+<img width="677" height="126" alt="Screenshot 2026-04-12 201340" src="https://github.com/user-attachments/assets/7cf83451-4a60-4883-9912-90dc6099053c" />
 
-Caption: One supervisor process managing multiple container instances concurrently.
+One supervisor process managing multiple container instances concurrently.
 
 2. Metadata tracking  
-Show the output of ./engine ps.  
+<img width="677" height="174" alt="image" src="https://github.com/user-attachments/assets/f65e9b68-f032-4357-b8d7-0e44caf194ee" />  
 
-Caption: Supervisor metadata table showing container ID, PID, state, start time, and log file.  
+Supervisor metadata table showing container ID, PID, state, start time, and log file.  
 
 3. Bounded-buffer logging  
 Show the container log file output and evidence that the logging pipeline is active.  
