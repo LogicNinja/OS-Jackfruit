@@ -7,187 +7,216 @@
 
 ---
 
-## 2. Build, Load, and Run Instructions
+## 2. Build, Load, and Run Instructions  
 
-### Environment  
+These instructions reflect the workflow used to build and run the project on Ubuntu 22.04/24.04 inside a VM.
 
-This project must be run on:
+### Environment Setup  
 
-- Ubuntu 22.04 or 24.04
-- Inside a VM
+The project was run on:
+
+- Ubuntu 22.04/24.04 in a VM
 - Secure Boot disabled
+- Linux kernel headers installed
 - Not on WSL
 
-Install dependencies:  
+**Install dependencies:**  
 
 ```bash
 sudo apt update
 sudo apt install -y build-essential linux-headers-$(uname -r)
 ```
 
-**Build**  
-All build steps are run from the boilerplate/ directory.
+**Build the Project**  
+All build commands were run from the boilerplate/ directory:
 
 ```bash
 cd boilerplate
 make
 ```
-This builds:  
+
+This builds:
 
 - engine
 - memory_hog
 - cpu_hog
 - io_pulse
 - monitor.ko
+  
+Because the workloads must run inside an Alpine rootfs, the workload binaries were rebuilt as static binaries:
 
-**Prepare the Root Filesystem**  
-From the repository root:
+```bash
+gcc -O2 -Wall -static -o memory_hog memory_hog.c
+gcc -O2 -Wall -static -o cpu_hog cpu_hog.c
+gcc -O2 -Wall -static -o io_pulse io_pulse.c
+```
+
+**Root Filesystem Layout**  
+In our setup, the root filesystems were kept inside boilerplate/:
+
+```bash
+boilerplate/rootfs-base
+boilerplate/rootfs-alpha
+boilerplate/rootfs-beta
+```
+
+If these directories are not already present, create them as follows:  
 
 ```bash
 mkdir rootfs-base
 wget https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-minirootfs-3.20.3-x86_64.tar.gz
 tar -xzf alpine-minirootfs-3.20.3-x86_64.tar.gz -C rootfs-base
-
-cp -a ./rootfs-base ./rootfs-alpha
-cp -a ./rootfs-base ./rootfs-beta
+cp -a rootfs-base rootfs-alpha
+cp -a rootfs-base rootfs-beta
 ```
-If a helper workload should run inside a container, copy it into that container rootfs before launch:
+
+Copy the workload binaries into the container root filesystems before launching containers:
 
 ```bash
-cp boilerplate/memory_hog ./rootfs-alpha/
-cp boilerplate/cpu_hog ./rootfs-alpha/
-cp boilerplate/io_pulse ./rootfs-beta/
+cp memory_hog rootfs-alpha/
+cp memory_hog rootfs-beta/
+cp cpu_hog rootfs-alpha/
+cp cpu_hog rootfs-beta/
+cp io_pulse rootfs-beta/
 ```
-
 **Load the Kernel Module**  
-From boilerplate/:
+Load the memory-monitor kernel module:
 
 ```bash
 sudo insmod monitor.ko
+lsmod | grep monitor
 ls -l /dev/container_monitor
-dmesg | tail
+sudo dmesg | tail -5
 ```
-Expected result:
 
-- monitor.ko loads successfully
-- /dev/container_monitor is created
-- dmesg shows that the container monitor module was loaded
+This should show that:
 
-**Start the Supervisor**  
-From boilerplate/:
+- the monitor module is loaded
+- /dev/container_monitor exists
+- the kernel log reports that the module was loaded successfully
+
+**Start the Supervisor**
+Start the long-running supervisor process from boilerplate/:
 
 ```bash
-sudo ./engine supervisor ../rootfs-base
+sudo ./engine supervisor ./rootfs-base
 ```
-The supervisor is a long-running parent process. It creates the control socket, accepts CLI requests, launches containers, registers them with the kernel monitor, collects logs, and reaps exited children.
+
+The supervisor opens /dev/container_monitor, creates the control socket, starts the logger thread, and waits for CLI requests.
 
 **Launch Containers**  
-Open another terminal in boilerplate/.  
-Start two background containers:  
+Open a second terminal in boilerplate/ and start two memory-test containers:
 
 ```bash
-sudo ./engine start alpha ../rootfs-alpha /bin/sh --soft-mib 48 --hard-mib 80
-sudo ./engine start beta ../rootfs-beta /bin/sh --soft-mib 64 --hard-mib 96
+sudo ./engine start alpha ./rootfs-alpha /memory_hog --soft-mib 100 --hard-mib 200
+sudo ./engine start beta ./rootfs-beta /memory_hog --soft-mib 100 --hard-mib 
 ```
 
-List tracked containers:  
+We initially tried lower limits such as 20/40 MiB, but the containers were killed too quickly. Increasing the limits to 100/200 MiB gave enough room for the workloads to run and for soft-limit events to be observed clearly.
+
+**Inspect Container Metadata**  
+List all tracked containers:
 
 ```bash
 sudo ./engine ps
 ```
+This shows the container ID, PID, state, start time, and log path.
 
-Inspect logs for one container:  
+**Inspect Logs**  
+View the log output produced through the bounded-buffer logging pipeline:
 
 ```bash
 sudo ./engine logs alpha
+sudo ./engine logs beta
 ```
 
-Stop containers:  
+You can also inspect the generated log files directly:
 
 ```bash
-sudo ./engine stop alpha
+ls logs/
+cat logs/alpha.log
+cat logs/beta.log
+```
+
+**Use the CLI to Stop a Container**  
+Stop one of the running containers:
+
+```bash
 sudo ./engine stop beta
-```
-
-**Run Memory Test**    
-Copy the memory workload into one container rootfs:
-
-```bash
-cp boilerplate/memory_hog ./rootfs-alpha/
-```
-
-Start the container with the memory workload:
-
-```bash
-sudo ./engine start memtest ../rootfs-alpha /memory_hog --soft-mib 48 --hard-mib 80
-```
-
-Inspect the container log:
-
-```bash
-sudo ./engine logs memtest
-```
-
-Inspect kernel messages:
-
-```bash
-dmesg | tail -n 30
-``` 
-Expected behavior:
-
-- the process gradually increases RSS
-- the kernel module logs a soft-limit warning once the soft threshold is crossed
-- the process is killed when the hard threshold is crossed
-
-**Run Scheduling Experiments**  
-Copy workloads into container rootfs directories:
-
-```bash
-cp boilerplate/cpu_hog ./rootfs-alpha/
-cp boilerplate/io_pulse ./rootfs-beta/
-```
-
-Launch two workloads concurrently:
-
-```bash
-sudo ./engine start cpu1 ../rootfs-alpha /cpu_hog --nice 5
-sudo ./engine start io1 ../rootfs-beta /io_pulse --nice 0
-```
-
-Inspect logs and compare behavior:
-
-```bash
-sudo ./engine logs cpu1
-sudo ./engine logs io1
 sudo ./engine ps
 ```
+This demonstrates the CLI-to-supervisor control channel and updates the tracked container state.
 
-**Shutdown and Cleanup**  
-Stop all containers:
+**Run the Soft-Limit Memory Test**  
+Start a container and inspect kernel log output for soft-limit warnings:
 
 ```bash
-sudo ./engine stop cpu1
-sudo ./engine stop io1
-sudo ./engine stop memtest
+sudo dmesg | grep "SOFT LIMIT"
 ```
 
-Stop the supervisor with ```Ctrl+C``` in the supervisor terminal.  
+In our demo, soft-limit warnings were observed for the memory_hog containers after launching them with the 100/200 MiB configuration.
 
-Unload the kernel module:
+**Run the Hard-Limit Memory Test**  
+To demonstrate hard-limit enforcement, start a container with a very low hard limit:
+
+```bash
+sudo ./engine start hardtest ./rootfs-alpha /memory_hog --soft-mib 10 --hard-mib 20
+sleep 5
+sudo dmesg | grep -E "SOFT|HARD" | tail -10
+sudo ./engine ps
+```
+This should show:  
+
+- a HARD LIMIT event in dmesg
+- the container state marked as killed in ./engine ps
+
+**Run the Scheduling Experiment**  
+Launch two CPU-bound containers with different nice values:
+
+```bash
+sudo ./engine start cpu-hi ./rootfs-alpha /cpu_hog --nice -5
+sudo ./engine start cpu-lo ./rootfs-beta /cpu_hog --nice 15
+```
+Then inspect their logs:
+
+```bash
+sudo ./engine logs cpu-hi
+sudo ./engine logs cpu-lo
+```
+The cpu_hog program runs for its default duration and prints progress lines of the form elapsed=.... In our run, both containers showed steady progress and completed successfully, which was used for the scheduling comparison.
+
+**Shutdown and Cleanup**  
+Stop the running CPU test containers:
+
+```bash
+sudo ./engine stop cpu-hi
+sudo ./engine stop cpu-lo
+```
+**Check for remaining processes:** 
+
+```bash
+ps aux | grep -E "engine|cpu_hog|memory_hog" | grep -v grep
+```
+Stop the supervisor by pressing Ctrl+C in the supervisor terminal.  
+
+Check again for leftover processes:  
+
+```bash
+ps aux | grep -E "engine|cpu_hog|memory_hog" | grep -v grep
+```
+Unload the kernel module:  
 
 ```bash
 sudo rmmod monitor
-dmesg | tail
+sudo dmesg | tail -5
 ```
-Optional cleanup:
+Optional cleanup:  
 
 ```bash
-cd boilerplate
 make clean
 ```
 
 ---
-
 ## 3. Demo with Screenshots
 
 ### 1. Multi-container supervision   
