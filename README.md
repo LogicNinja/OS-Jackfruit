@@ -1,111 +1,234 @@
-# Multi-Container Runtime
+# Multi-Container Runtime with Kernel Memory Monitor
 
-A lightweight Linux container runtime in C with a long-running supervisor and a kernel-space memory monitor.
+## 1. Team Information
 
-Read [`project-guide.md`](project-guide.md) for the full project specification.
+- **Member 1:** Ankita Vellara - PES2UG24AM021
+- **Member 2:** K Ashritha Reddy - PES2UG24AM071
 
 ---
 
-## Getting Started
+## 2. Build, Load, and Run Instructions
 
-### 1. Fork the Repository
+### Environment  
 
-1. Go to [github.com/shivangjhalani/OS-Jackfruit](https://github.com/shivangjhalani/OS-Jackfruit)
-2. Click **Fork** (top-right)
-3. Clone your fork:
+This project must be run on:
 
-```bash
-git clone https://github.com/<your-username>/OS-Jackfruit.git
-cd OS-Jackfruit
-```
+- Ubuntu 22.04 or 24.04
+- Inside a VM
+- Secure Boot disabled
+- Not on WSL
 
-### 2. Set Up Your VM
-
-You need an **Ubuntu 22.04 or 24.04** VM with **Secure Boot OFF**. WSL will not work.
-
-Install dependencies:
+Install dependencies:  
 
 ```bash
 sudo apt update
 sudo apt install -y build-essential linux-headers-$(uname -r)
 ```
 
-### 3. Run the Environment Check
+**Build**  
+All build steps are run from the boilerplate/ directory.
 
 ```bash
 cd boilerplate
-chmod +x environment-check.sh
-sudo ./environment-check.sh
+make
 ```
+This builds:  
 
-Fix any issues reported before moving on.
+- engine
+- memory_hog
+- cpu_hog
+- io_pulse
+- monitor.ko
 
-### 4. Prepare the Root Filesystem
+**Prepare the Root Filesystem**  
+From the repository root:
 
 ```bash
 mkdir rootfs-base
 wget https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-minirootfs-3.20.3-x86_64.tar.gz
 tar -xzf alpine-minirootfs-3.20.3-x86_64.tar.gz -C rootfs-base
 
-# Make one writable copy per container you plan to run
 cp -a ./rootfs-base ./rootfs-alpha
 cp -a ./rootfs-base ./rootfs-beta
 ```
+If a helper workload should run inside a container, copy it into that container rootfs before launch:
 
-Do not commit `rootfs-base/` or `rootfs-*` directories to your repository.
+```bash
+cp boilerplate/memory_hog ./rootfs-alpha/
+cp boilerplate/cpu_hog ./rootfs-alpha/
+cp boilerplate/io_pulse ./rootfs-beta/
+```
 
-### 5. Understand the Boilerplate
+**Load the Kernel Module**  
+From boilerplate/:
 
-The `boilerplate/` folder contains starter files:
+```bash
+sudo insmod monitor.ko
+ls -l /dev/container_monitor
+dmesg | tail
+```
+Expected result:
 
-| File                   | Purpose                                             |
-| ---------------------- | --------------------------------------------------- |
-| `engine.c`             | User-space runtime and supervisor skeleton          |
-| `monitor.c`            | Kernel module skeleton                              |
-| `monitor_ioctl.h`      | Shared ioctl command definitions                    |
-| `Makefile`             | Build targets for both user-space and kernel module |
-| `cpu_hog.c`            | CPU-bound test workload                             |
-| `io_pulse.c`           | I/O-bound test workload                             |
-| `memory_hog.c`         | Memory-consuming test workload                      |
-| `environment-check.sh` | VM environment preflight check                      |
+- monitor.ko loads successfully
+- /dev/container_monitor is created
+- dmesg shows that the container monitor module was loaded
 
-Use these as your starting point. You are free to restructure the repository however you want — the submission requirements are listed in the project guide.
+**Start the Supervisor**  
+From boilerplate/:
 
-### 6. Build and Verify
+```bash
+sudo ./engine supervisor ../rootfs-base
+```
+The supervisor is a long-running parent process. It creates the control socket, accepts CLI requests, launches containers, registers them with the kernel monitor, collects logs, and reaps exited children.
+
+**Launch Containers**  
+Open another terminal in boilerplate/.  
+Start two background containers:  
+
+```bash
+sudo ./engine start alpha ../rootfs-alpha /bin/sh --soft-mib 48 --hard-mib 80
+sudo ./engine start beta ../rootfs-beta /bin/sh --soft-mib 64 --hard-mib 96
+```
+
+List tracked containers:  
+
+```bash
+sudo ./engine ps
+```
+
+Inspect logs for one container:  
+
+```bash
+sudo ./engine logs alpha
+```
+
+Stop containers:  
+
+```bash
+sudo ./engine stop alpha
+sudo ./engine stop beta
+```
+
+**Run Memory Test**    
+Copy the memory workload into one container rootfs:
+
+```bash
+cp boilerplate/memory_hog ./rootfs-alpha/
+```
+
+Start the container with the memory workload:
+
+```bash
+sudo ./engine start memtest ../rootfs-alpha /memory_hog --soft-mib 48 --hard-mib 80
+```
+
+Inspect the container log:
+
+```bash
+sudo ./engine logs memtest
+```
+
+Inspect kernel messages:
+
+```bash
+dmesg | tail -n 30
+``` 
+Expected behavior:
+
+- the process gradually increases RSS
+- the kernel module logs a soft-limit warning once the soft threshold is crossed
+- the process is killed when the hard threshold is crossed
+
+**Run Scheduling Experiments**  
+Copy workloads into container rootfs directories:
+
+```bash
+cp boilerplate/cpu_hog ./rootfs-alpha/
+cp boilerplate/io_pulse ./rootfs-beta/
+```
+
+Launch two workloads concurrently:
+
+```bash
+sudo ./engine start cpu1 ../rootfs-alpha /cpu_hog --nice 5
+sudo ./engine start io1 ../rootfs-beta /io_pulse --nice 0
+```
+
+Inspect logs and compare behavior:
+
+```bash
+sudo ./engine logs cpu1
+sudo ./engine logs io1
+sudo ./engine ps
+```
+
+**Shutdown and Cleanup**  
+Stop all containers:
+
+```bash
+sudo ./engine stop cpu1
+sudo ./engine stop io1
+sudo ./engine stop memtest
+```
+
+Stop the supervisor with ```Ctrl+C``` in the supervisor terminal.  
+
+Unload the kernel module:
+
+```bash
+sudo rmmod monitor
+dmesg | tail
+```
+Optional cleanup:
 
 ```bash
 cd boilerplate
-make
+make clean
 ```
 
-If this compiles without errors, your environment is ready.
+## 3. Demo with Screenshots
 
-### 7. GitHub Actions Smoke Check
+1. Multi-container supervision
+Show two or more containers running under one supervisor process.
 
-Your fork will inherit a minimal GitHub Actions workflow from this repository.
+Caption: One supervisor process managing multiple container instances concurrently.
 
-That workflow only performs CI-safe checks:
+2. Metadata tracking
+Show the output of ./engine ps.
 
-- `make -C boilerplate ci`
-- user-space binary compilation (`engine`, `memory_hog`, `cpu_hog`, `io_pulse`)
-- `./boilerplate/engine` with no arguments must print usage and exit with a non-zero status
+Caption: Supervisor metadata table showing container ID, PID, state, start time, and log file.
 
-The CI-safe build command is:
+3. Bounded-buffer logging
+Show the container log file output and evidence that the logging pipeline is active.
 
-```bash
-make -C boilerplate ci
-```
+Caption: Container stdout/stderr captured through the bounded-buffer logging pipeline and written into persistent log files.
 
-This smoke check does not test kernel-module loading, supervisor runtime behavior, or container execution.
+4. CLI and IPC
+Show a CLI command being issued and the supervisor responding.
 
----
+Caption: CLI request sent to the supervisor over the control IPC channel and acknowledged by the supervisor.
 
-## What to Do Next
+5. Soft-limit warning
+Show dmesg or monitor output for a soft-limit event.
 
-Read [`project-guide.md`](project-guide.md) end to end. It contains:
+Caption: Kernel monitor warning generated when container RSS crossed the soft memory threshold.
 
-- The six implementation tasks (multi-container runtime, CLI, logging, kernel monitor, scheduling experiments, cleanup)
-- The engineering analysis you must write
-- The exact submission requirements, including what your `README.md` must contain (screenshots, analysis, design decisions)
+6. Hard-limit enforcement
+Show the container being killed after exceeding the hard limit and the supervisor reflecting the termination.
 
-Your fork's `README.md` should be replaced with your own project documentation as described in the submission package section of the project guide. (As in get rid of all the above content and replace with your README.md)
+Caption: Kernel monitor hard-limit enforcement causing process termination and updated supervisor state.
+
+7. Scheduling experiment
+Show terminal outputs or measurements comparing workloads or priorities.
+
+Caption: Observable scheduling differences between concurrent workloads under different CPU priorities or workload types.
+
+8. Clean teardown
+Show that there are no zombie processes and that shutdown completes cleanly.
+
+Caption: Supervisor shutdown with containers reaped, logger thread exiting, and no lingering zombie processes.
+
+
+
+
+
