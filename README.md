@@ -188,45 +188,45 @@ make clean
 
 ## 3. Demo with Screenshots
 
-1. Multi-container supervision
-Show two or more containers running under one supervisor process.
+1. Multi-container supervision  
+Show two or more containers running under one supervisor process.  
 
 Caption: One supervisor process managing multiple container instances concurrently.
 
-2. Metadata tracking
-Show the output of ./engine ps.
+2. Metadata tracking  
+Show the output of ./engine ps.  
 
-Caption: Supervisor metadata table showing container ID, PID, state, start time, and log file.
+Caption: Supervisor metadata table showing container ID, PID, state, start time, and log file.  
 
-3. Bounded-buffer logging
-Show the container log file output and evidence that the logging pipeline is active.
+3. Bounded-buffer logging  
+Show the container log file output and evidence that the logging pipeline is active.  
 
-Caption: Container stdout/stderr captured through the bounded-buffer logging pipeline and written into persistent log files.
+Caption: Container stdout/stderr captured through the bounded-buffer logging pipeline and written into persistent log files.  
 
-4. CLI and IPC
-Show a CLI command being issued and the supervisor responding.
+4. CLI and IPC  
+Show a CLI command being issued and the supervisor responding.  
 
-Caption: CLI request sent to the supervisor over the control IPC channel and acknowledged by the supervisor.
+Caption: CLI request sent to the supervisor over the control IPC channel and acknowledged by the supervisor.  
 
-5. Soft-limit warning
-Show dmesg or monitor output for a soft-limit event.
+5. Soft-limit warning  
+Show dmesg or monitor output for a soft-limit event.  
 
-Caption: Kernel monitor warning generated when container RSS crossed the soft memory threshold.
+Caption: Kernel monitor warning generated when container RSS crossed the soft memory threshold.  
 
-6. Hard-limit enforcement
-Show the container being killed after exceeding the hard limit and the supervisor reflecting the termination.
+6. Hard-limit enforcement  
+Show the container being killed after exceeding the hard limit and the supervisor reflecting the termination.  
 
-Caption: Kernel monitor hard-limit enforcement causing process termination and updated supervisor state.
+Caption: Kernel monitor hard-limit enforcement causing process termination and updated supervisor state.  
 
-7. Scheduling experiment
-Show terminal outputs or measurements comparing workloads or priorities.
+7. Scheduling experiment  
+Show terminal outputs or measurements comparing workloads or priorities.  
 
-Caption: Observable scheduling differences between concurrent workloads under different CPU priorities or workload types.
+Caption: Observable scheduling differences between concurrent workloads under different CPU priorities or workload types.  
 
-8. Clean teardown
-Show that there are no zombie processes and that shutdown completes cleanly.
+8. Clean teardown  
+Show that there are no zombie processes and that shutdown completes cleanly.  
 
-Caption: Supervisor shutdown with containers reaped, logger thread exiting, and no lingering zombie processes.
+Caption: Supervisor shutdown with containers reaped, logger thread exiting, and no lingering zombie processes.  
 
 
 
