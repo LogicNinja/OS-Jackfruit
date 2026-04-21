@@ -9,58 +9,47 @@
 
 ## 2. Build, Load, and Run Instructions  
 
-These instructions reflect the workflow used to build and run the project on Ubuntu 22.04/24.04 inside a VM.
-
-### Environment Setup  
-
-The project was run on:
-
-- Ubuntu 22.04/24.04 in a VM
-- Secure Boot disabled
-- Linux kernel headers installed
-- Not on WSL
-
-**Install dependencies:**  
+### Install Dependencies
 
 ```bash
 sudo apt update
 sudo apt install -y build-essential linux-headers-$(uname -r)
 ```
-
 **Build the Project**  
-All build commands were run from the boilerplate/ directory:
+
+Run all build commands from the boilerplate/ directory:  
 
 ```bash
 cd boilerplate
 make
 ```
-
-This builds:
+This builds:  
 
 - engine
 - memory_hog
 - cpu_hog
 - io_pulse
 - monitor.ko
-  
-Because the workloads must run inside an Alpine rootfs, the workload binaries were rebuilt as static binaries:
+
+**Rebuild Workloads as Static Binaries**
+
+Since containers use an Alpine root filesystem:  
 
 ```bash
 gcc -O2 -Wall -static -o memory_hog memory_hog.c
 gcc -O2 -Wall -static -o cpu_hog cpu_hog.c
 gcc -O2 -Wall -static -o io_pulse io_pulse.c
 ```
+**Root Filesystem Setup**
 
-**Root Filesystem Layout**  
-In our setup, the root filesystems were kept inside boilerplate/:
+Root filesystems are stored inside boilerplate/:  
 
-```bash
-boilerplate/rootfs-base
-boilerplate/rootfs-alpha
-boilerplate/rootfs-beta
 ```
-
-If these directories are not already present, create them as follows:  
+rootfs-base/
+rootfs-alpha/
+rootfs-beta/
+```
+If these directories are not already present, create them:  
 
 ```bash
 mkdir rootfs-base
@@ -69,9 +58,7 @@ tar -xzf alpine-minirootfs-3.20.3-x86_64.tar.gz -C rootfs-base
 cp -a rootfs-base rootfs-alpha
 cp -a rootfs-base rootfs-beta
 ```
-
-Copy the workload binaries into the container root filesystems before launching containers:
-
+Copy Workloads into Root Filesystems 
 ```bash
 cp memory_hog rootfs-alpha/
 cp memory_hog rootfs-beta/
@@ -79,8 +66,7 @@ cp cpu_hog rootfs-alpha/
 cp cpu_hog rootfs-beta/
 cp io_pulse rootfs-beta/
 ```
-**Load the Kernel Module**  
-Load the memory-monitor kernel module:
+**Load the Kernel Module**
 
 ```bash
 sudo insmod monitor.ko
@@ -89,48 +75,55 @@ ls -l /dev/container_monitor
 sudo dmesg | tail -5
 ```
 
-This should show that:
+Verify:
 
-- the monitor module is loaded
+- module is loaded
 - /dev/container_monitor exists
-- the kernel log reports that the module was loaded successfully
-
-**Start the Supervisor**
-Start the long-running supervisor process from boilerplate/:
+- kernel logs show successful initialization
+  
+**Start the Supervisor (Terminal 1)**
 
 ```bash
 sudo ./engine supervisor ./rootfs-base
 ```
+The supervisor:  
 
-The supervisor opens /dev/container_monitor, creates the control socket, starts the logger thread, and waits for CLI requests.
+- manages containers
+- initializes logging
+- opens /dev/container_monitor
+- waits for CLI commands
+  
+**Launch Containers (Terminal 2)**
 
-**Launch Containers**  
-Open a second terminal in boilerplate/ and start two memory-test containers:
+Open a new terminal in boilerplate/:  
 
 ```bash
 sudo ./engine start alpha ./rootfs-alpha /memory_hog --soft-mib 100 --hard-mib 200
-sudo ./engine start beta ./rootfs-beta /memory_hog --soft-mib 100 --hard-mib 
+sudo ./engine start beta  ./rootfs-beta  /memory_hog --soft-mib 100 --hard-mib 200
 ```
 
-We initially tried lower limits such as 20/40 MiB, but the containers were killed too quickly. Increasing the limits to 100/200 MiB gave enough room for the workloads to run and for soft-limit events to be observed clearly.
-
-**Inspect Container Metadata**  
-List all tracked containers:
+**Inspect Container Metadata**
 
 ```bash
 sudo ./engine ps
 ```
-This shows the container ID, PID, state, start time, and log path.
 
-**Inspect Logs**  
-View the log output produced through the bounded-buffer logging pipeline:
+Displays:
+
+- container ID
+- PID
+- state
+- start time
+- log file path
+
+**Inspect Logs**
 
 ```bash
 sudo ./engine logs alpha
 sudo ./engine logs beta
 ```
 
-You can also inspect the generated log files directly:
+Or directly:  
 
 ```bash
 ls logs/
@@ -138,26 +131,22 @@ cat logs/alpha.log
 cat logs/beta.log
 ```
 
-**Use the CLI to Stop a Container**  
-Stop one of the running containers:
+**Stop a Container**
 
 ```bash
 sudo ./engine stop beta
 sudo ./engine ps
 ```
-This demonstrates the CLI-to-supervisor control channel and updates the tracked container state.
 
-**Run the Soft-Limit Memory Test**  
-Start a container and inspect kernel log output for soft-limit warnings:
+**Soft Limit Memory Test**
 
 ```bash
 sudo dmesg | grep "SOFT LIMIT"
 ```
 
-In our demo, soft-limit warnings were observed for the memory_hog containers after launching them with the 100/200 MiB configuration.
+Expected: warnings when memory exceeds soft limit  
 
-**Run the Hard-Limit Memory Test**  
-To demonstrate hard-limit enforcement, start a container with a very low hard limit:
+**Hard Limit Memory Test**
 
 ```bash
 sudo ./engine start hardtest ./rootfs-alpha /memory_hog --soft-mib 10 --hard-mib 20
@@ -165,52 +154,64 @@ sleep 5
 sudo dmesg | grep -E "SOFT|HARD" | tail -10
 sudo ./engine ps
 ```
-This should show:  
 
-- a HARD LIMIT event in dmesg
-- the container state marked as killed in ./engine ps
+Expected:
 
-**Run the Scheduling Experiment**  
-Launch two CPU-bound containers with different nice values:
+- HARD LIMIT message in kernel logs
+- container marked as killed
+  
+**Scheduling Experiment**
 
 ```bash
 sudo ./engine start cpu-hi ./rootfs-alpha /cpu_hog --nice -5
 sudo ./engine start cpu-lo ./rootfs-beta /cpu_hog --nice 15
 ```
-Then inspect their logs:
 
-```bash
+**Check logs:**
+
+```
 sudo ./engine logs cpu-hi
 sudo ./engine logs cpu-lo
 ```
-The cpu_hog program runs for its default duration and prints progress lines of the form elapsed=.... In our run, both containers showed steady progress and completed successfully, which was used for the scheduling comparison.
 
-**Shutdown and Cleanup**  
-Stop the running CPU test containers:
+Observation:
+
+- cpu-hi receives higher CPU share due to better priority
+- cpu-lo still progresses due to scheduler fairness
+
+**Cleanup**
+
+Stop containers:  
 
 ```bash
 sudo ./engine stop cpu-hi
 sudo ./engine stop cpu-lo
 ```
-**Check for remaining processes:** 
+
+**Check for leftover processes:**
 
 ```bash
 ps aux | grep -E "engine|cpu_hog|memory_hog" | grep -v grep
 ```
-Stop the supervisor by pressing Ctrl+C in the supervisor terminal.  
 
-Check again for leftover processes:  
+**Stop the supervisor:**
+
+```Ctrl + C```
+
+**Check again:**
 
 ```bash
 ps aux | grep -E "engine|cpu_hog|memory_hog" | grep -v grep
 ```
-Unload the kernel module:  
+
+**Unload kernel module:**
 
 ```bash
 sudo rmmod monitor
 sudo dmesg | tail -5
 ```
-Optional cleanup:  
+
+**Optional cleanup:**
 
 ```bash
 make clean
