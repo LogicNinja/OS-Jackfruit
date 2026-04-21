@@ -2,8 +2,8 @@
 
 ## 1. Team Information
 
-- **Member 1:** Ankita Vellara - PES2UG24AM021
-- **Member 2:** K Ashritha Reddy - PES2UG24AM071
+- **Member 1:** K Ashritha Reddy - PES2UG24AM071
+- **Member 2:** Ankita Vellara - PES2UG24AM021
 
 ---
 
